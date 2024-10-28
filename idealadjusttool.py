@@ -233,48 +233,11 @@ def generate_contrast_advice(contrast):
     else:
         return "Contrast levels are satisfactory. Good for capturing details."
 
-# def apply_recommendations(original_image, recommended_brightness, recommended_contrast):
-#     # 이미지 복사
-#     adjusted_image = original_image.copy()
-
-#     # LAB 색 공간으로 변환
-#     lab = cv2.cvtColor(adjusted_image, cv2.COLOR_BGR2LAB)
-#     l, a, b = cv2.split(lab)
-
-#     # CLAHE 적용
-#     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-#     l = clahe.apply(l)
-
-#     # 밝기 및 대비 조정
-#     adjusted_image = cv2.merge((l, a, b))
-#     adjusted_image = cv2.cvtColor(adjusted_image, cv2.COLOR_LAB2BGR)
-#     adjusted_image = cv2.convertScaleAbs(adjusted_image, alpha=1.1, beta=-15)  # 밝기 감소
-
-#     # 색상 보정
-#     b, g, r = cv2.split(adjusted_image)
-#     b = cv2.addWeighted(b, 1.05, 0, 0, 0)  # 파란색 강조
-#     r = cv2.addWeighted(r, 0.9, 0, 0, 0)  # 빨간색 약간 감소
-#     adjusted_image = cv2.merge((b, g, r))
-
-#     # 검정색 건물 부분의 디테일 보존
-#     black_building_mask = cv2.inRange(l, 0, 100)  # 검정색 건물 마스크
-#     adjusted_image[black_building_mask > 0] = cv2.convertScaleAbs(adjusted_image[black_building_mask > 0], alpha=1.2, beta=15)  # 밝기 조정
-
-#     # 나무 부분의 디테일 보존을 위한 추가 조정
-#     mask_trees = cv2.inRange(g, 50, 150)  # 나무 색상을 기준으로 마스크 생성
-#     adjusted_image[mask_trees > 0] = cv2.convertScaleAbs(adjusted_image[mask_trees > 0], alpha=1.1, beta=10)  # 나무 부분 밝기 조정
-
-#     # 샤프닝 필터 적용
-#     sharpened_image = cv2.filter2D(adjusted_image, -1, np.array([[0, -0.3, 0], [-0.3, 2, -0.3], [0, -0.3, 0]]))
-#     final_image = cv2.addWeighted(adjusted_image, 0.7, sharpened_image, 0.3, 0)
-
-#     return final_image
-
 def apply_recommendations(original_image, recommended_brightness, recommended_contrast):
     # 이미지 복사
     adjusted_image = original_image.copy()
 
-    # LAB 색 공간으로 변환
+    # LAB 색 공간으로 변환하여 대비 조정
     lab = cv2.cvtColor(adjusted_image, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
 
@@ -282,27 +245,35 @@ def apply_recommendations(original_image, recommended_brightness, recommended_co
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     l = clahe.apply(l)
 
-    # 밝기 및 대비 조정
+    # LAB 색 공간에서 다시 병합
     adjusted_image = cv2.merge((l, a, b))
     adjusted_image = cv2.cvtColor(adjusted_image, cv2.COLOR_LAB2BGR)
-    adjusted_image = cv2.convertScaleAbs(adjusted_image, alpha=1.05, beta=-10)  # 밝기 감소
 
-    # 구름 영역 조정
-    gray_image = cv2.cvtColor(adjusted_image, cv2.COLOR_BGR2GRAY)
-    cloud_mask = (gray_image < 100).astype(np.uint8)  # 어두운 구름 영역
-    adjusted_image[cloud_mask > 0] = cv2.convertScaleAbs(adjusted_image[cloud_mask > 0], alpha=0.9, beta=0)  # 구름 밝기 조정
+    # HSV 색 공간으로 변환하여 하늘 영역 마스킹
+    hsv = cv2.cvtColor(adjusted_image, cv2.COLOR_BGR2HSV)
+    lower_blue = np.array([90, 50, 50])   # 하늘색 범위 설정
+    upper_blue = np.array([140, 255, 255])
+    sky_mask = cv2.inRange(hsv, lower_blue, upper_blue)
 
-    # 색상 보정
-    b, g, r = cv2.split(adjusted_image)
-    b = cv2.addWeighted(b, 1.05, 0, 0, 0)  # 파란색 강조
-    r = cv2.addWeighted(r, 0.95, 0, 0, 0)  # 빨간색 약간 감소
-    adjusted_image = cv2.merge((b, g, r))
+    # 하늘 영역 조정
+    sky_region = cv2.bitwise_and(adjusted_image, adjusted_image, mask=sky_mask)
+    # 하늘의 색상 강도 및 대비 조정
+    sky_region = cv2.convertScaleAbs(sky_region, alpha=1.05, beta=5)
+    
+    # 건물 및 다른 요소 마스킹
+    building_mask = cv2.bitwise_not(sky_mask)
+    building_region = cv2.bitwise_and(adjusted_image, adjusted_image, mask=building_mask)
+    
+    # 건물의 색상 및 대비 조정
+    building_region = cv2.convertScaleAbs(building_region, alpha=1.05, beta=0)
 
-    # 검정색 건물 부분의 디테일 보존
-    black_building_mask = cv2.inRange(l, 0, 100)  # 검정색 건물 마스크
-    adjusted_image[black_building_mask > 0] = cv2.convertScaleAbs(adjusted_image[black_building_mask > 0], alpha=1.1, beta=10)  # 밝기 조정
+    # 최종 이미지 결합
+    final_image = cv2.add(sky_region, building_region)
 
-    return adjusted_image
+    # 색상 균형 조정
+    final_image = cv2.convertScaleAbs(final_image, alpha=1.0, beta=0)
+
+    return final_image
 
 def local_brightness_correction(image):
     # Convert image to LAB color space
@@ -342,4 +313,4 @@ def compare_images(original_image, adjusted_image):
     plt.show()
 
 # Example usage
-analyze_image('<Put image in here>.jpg')  # Replace with your image path
+analyze_image('/content/Big Ben Best.jpg')  # Replace with your image path
